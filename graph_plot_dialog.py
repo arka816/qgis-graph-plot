@@ -23,6 +23,7 @@
 """
 
 BEZIER_RES = 0.01
+BEZIER_PTS = int(1 // 0.01)
 MAX_STROKE_WIDTH = 0.5
 
 import pandas as pd
@@ -100,6 +101,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
 
+        self.config_file_path = os.path.join(localdir, ".conf")
+
         # TODO: make labeled slider
         self.edge_thres_slider.setRange(0, self._THRESHOLD_UNIT)
         self.edge_thres_slider.setSingleStep(1)
@@ -108,7 +111,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.edge_thres_slider.valueChanged.connect(lambda value: self.threshold_label.setText(f"{(value / self._THRESHOLD_UNIT):.3f}"))
 
 
-        self.adj_csv_loader.clicked.connect(self._select_csv_file)
+        self.adj_csv_loader.clicked.connect(self._select_adj_file)
+        self.coords_csv_loader.clicked.connect(self._select_coords_file)
         self.load_data_btn.clicked.connect(self.start)
         self.plot_btn.clicked.connect(self.plot)
         self.commit_btn.clicked.connect(self._commit_edits)
@@ -117,6 +121,42 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.adjacency_table.cellClicked.connect(self._table_cell_clicked)
 
         iface.layerTreeView().currentLayerChanged.connect(self._commit_edits)
+
+        self.elem_config_map = {
+            "ADJ_FILE": self.adj_file_path,
+            "COORDS_FILE": self.coords_file_path
+        }
+
+        # load saved input
+        self._load_prev_input()
+
+        # connect to input saver
+        self.rejected.connect(self._save_input)
+
+    def _save_input(self):
+        try:
+            with open(self.config_file_path, 'w') as f:
+                l = list()
+
+                for key, val in self.elem_config_map.items():
+                    l.append(f"{key}={val.text()}")
+
+                f.write('\n'.join(l))
+        except:
+            pass
+
+    def _load_prev_input(self):
+        if os.path.exists(self.config_file_path):
+            # load configurations from configfile
+            try:
+                with open(self.config_file_path) as f:
+                    for line in f.readlines():
+                        key, val = line.strip('\n').split("=")
+                        elem = self.elem_config_map[key]
+
+                        elem.setText(val)
+            except:
+                self.logBox.append("Error: could not load from config file.")
 
     def _table_cell_clicked(self, row, col):
         self.log_box.append(f"{row}, {col} clicked")
@@ -130,9 +170,13 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         else:
             self.log_box.append("removed all layers")
     
-    def _select_csv_file(self):
-        csv_file_path, _ = QFileDialog.getOpenFileName(self, "choose csv file", "", "*.csv")
-        self.csv_file_path.setText(csv_file_path)
+    def _select_adj_file(self):
+        adj_file_path, _ = QFileDialog.getOpenFileName(self, "choose csv file", "", "*.csv")
+        self.adj_file_path.setText(adj_file_path)
+
+    def _select_coords_file(self):
+        coords_file_path, _ = QFileDialog.getOpenFileName(self, "choose csv file", "", "*.csv")
+        self.coords_file_path.setText(coords_file_path)
 
     def _write_table(self, df):
         df = df.astype(str)
@@ -185,10 +229,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         pass
 
     def start(self):
-        adj_file_path = 'C:/Users/arka/Documents/summer 23/transition_matrix.csv'
+        # adj_file_path = 'C:/Users/arka/Documents/summer 23/transition_matrix.csv'
         # adj_file_path = 'C:/Users/arka/Documents/summer 23/transition_matrix - Copy.csv'
         
-        # adj_file_path = self.adj_file_path.text()
+        adj_file_path = self.adj_file_path.text()
 
         if os.path.isfile(adj_file_path):
             # TODO: normalize adjacency matrix
@@ -432,8 +476,11 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         if 'point' not in path.columns:
             path['point'] = path.apply(lambda p: QgsPoint(p['lng'], p['lat']), axis=1)
 
+        mid_pt = BEZIER_PTS // 2
+        arrow_line = path['point'].iloc[mid_pt:mid_pt + 2].tolist()
+
         seg = QgsFeature()
-        geom = QgsLineString(path['point'].iloc[-2:].tolist())
+        geom = QgsLineString(arrow_line)
         seg.setGeometry(geom)
 
         self.arrowProvider.addFeatures([seg])
@@ -473,8 +520,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
     def plot(self):
         self._remove_layers()
 
-        coords_file_path = 'C:/Users/arka/Documents/summer 23/clusters.csv'
-        # coords_file_path = self.coords_file_path.text()
+        # coords_file_path = 'C:/Users/arka/Documents/summer 23/clusters.csv'
+        coords_file_path = self.coords_file_path.text()
 
         # TODO: replace startEditing...commitChanges with edit() [from qgis.core import edit]
 
@@ -538,7 +585,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
             self.edgeLayer.selectionChanged.connect(self._handle_edge_selection)
 
-            # HIDDEN ARROW LAYER
+            # ARROW LAYER
             self.arrowLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'arrow', 'memory')
             # self.arrowLayer.setFlags(QgsMapLayer.Private)
             self.arrowProvider = self.arrowLayer.dataProvider()
