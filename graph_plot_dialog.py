@@ -41,7 +41,7 @@ from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QSlider
 import PyQt5.QtCore as QtCore
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant, Qt
 from qgis.core import QgsApplication, \
     QgsVectorLayer, QgsFeature, QgsGeometry, \
     QgsPoint, QgsPointXY, QgsLineString, \
@@ -379,13 +379,40 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # self.log_box.append(f"added edge feature {edgeFeatures[-1].id()}")
 
-    def _set_edge_renderer(self):
-        '''
-            set graduated symbol renderer to render lines with different stroke widths
-        '''
-        if self.adj.nunique().sum() <= 1:
-            return 
-        
+    def _get_symbol(self, layer_type='edge'):
+        if layer_type == 'edge':
+            return QgsSymbol.defaultSymbol(self.edgeLayer.geometryType()) 
+        elif layer_type == 'arrow':
+            # Base style.    
+            line = QgsLineSymbol()    
+
+            # Create an marker line.
+            marker_line = QgsMarkerLineSymbolLayer()
+
+            # Configure the marker.
+            simple_marker = QgsSimpleMarkerSymbolLayer()
+            simple_marker.setShape(QgsSimpleMarkerSymbolLayerBase.Triangle)
+            simple_marker.setSize(2)
+            simple_marker.setAngle(90)
+            simple_marker.setFillColor(QColor.fromHsl(200, 255, 31))
+            # simple_marker.setOutlineColor(QColor("transparent"))
+            # simple_marker.setStrokeWidth(0)
+            simple_marker.setStrokeStyle(0)
+
+            # The marker has its own symbol layer.
+            marker = QgsMarkerSymbol()
+            marker.changeSymbolLayer(0, simple_marker)
+
+            # Add the layer to the marker layer.
+            marker_line.setPlacement(QgsMarkerLineSymbolLayer.CentralPoint)
+            marker_line.setSubSymbol(marker)
+
+            # Finally replace the symbol layer in the base style.
+            line.changeSymbolLayer(0, marker_line)
+
+            return line
+
+    def _get_renderer_range_list(self, layer_type='edge'):
         self.max_graph_weight = self.adj.max().max()
         self.min_graph_weight = self.adj.min().min()
 
@@ -397,14 +424,27 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         rangeList = []
 
         for i in np.arange(min_weight, max_weight, unit):
-            symbol = QgsSymbol.defaultSymbol(self.edgeLayer.geometryType())
+            symbol = self._get_symbol(layer_type)
+
             # symbol.setColor(QColor.fromHsl(200, 255, 255 - min(int(128 * (1 + (i - min_weight) / (weight_range))), 256) - 1))
             symbol.setColor(QColor.fromHsl(200, 255, min(max(int(128 * (max_weight - i) / weight_range) + 10, 0), 255)))
-            symbol.setWidth(0.15 + (1 - 0.15) * (i - min_weight) / (weight_range))
+
+            if layer_type == 'edge':
+                symbol.setWidth(0.15 + (1 - 0.15) * (i - min_weight) / (weight_range))
 
             range_ = QgsRendererRange(i, i + unit - 1e-10, symbol, f"category {i:.2f} - {(i + unit):.2f}")
             rangeList.append(range_)
-            
+
+        return rangeList
+
+    def _set_edge_renderer(self):
+        '''
+            set graduated symbol renderer to render lines with different stroke widths
+        '''
+        if self.adj.nunique().sum() <= 1:
+            return 
+        
+        rangeList = self._get_renderer_range_list(layer_type='edge')            
 
         renderer = QgsGraduatedSymbolRenderer('edges', rangeList) 
 
@@ -443,9 +483,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         layer_settings  = QgsPalLayerSettings()
 
         text_format = QgsTextFormat()
-        text_format.setFont(QFont("Arial", 5))
+        text_format.setFont(QFont("Arial", 7))
         text_format.setColor(QColor.fromHsl(200, 255, 31))
-        text_format.setSize(5)
+        text_format.setSize(7)
 
         # buffer_settings = QgsTextBufferSettings()
         # buffer_settings.setEnabled(True)
@@ -459,6 +499,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         layer_settings.isExpression = True
         layer_settings.fieldName = 'concat(left("weight" * 100, 4), \'%\')'
         layer_settings.placement = QgsPalLayerSettings.Curved
+        layer_settings.distance = 1.0
 
         layer_settings.enabled = True
 
@@ -472,6 +513,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         # TODO: draw arrow edge with the correct length corresponding to size of triangle marker
 
         path = edge['path']
+        thickness = edge['weight']
 
         if 'point' not in path.columns:
             path['point'] = path.apply(lambda p: QgsPoint(p['lng'], p['lat']), axis=1)
@@ -483,37 +525,25 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         geom = QgsLineString(arrow_line)
         seg.setGeometry(geom)
 
+        seg.setAttributes([
+            float(thickness)
+        ])
+
         self.arrowProvider.addFeatures([seg])
 
     def _set_arrow_renderer(self):
-        # Base style.    
-        line = QgsLineSymbol()    
-
-        # Create an marker line.
-        marker_line = QgsMarkerLineSymbolLayer()
-
-        # Configure the marker.
-        simple_marker = QgsSimpleMarkerSymbolLayer()
-        simple_marker.setShape(QgsSimpleMarkerSymbolLayerBase.Triangle)
-        simple_marker.setSize(2)
-        simple_marker.setAngle(90)
-        simple_marker.setFillColor(QColor.fromHsl(200, 255, 31))
-        # simple_marker.setOutlineColor(QColor("transparent"))
-        simple_marker.setStrokeWidth(0)
-
-        # The marker has its own symbol layer.
-        marker = QgsMarkerSymbol()
-        marker.changeSymbolLayer(0, simple_marker)
-
-        # Add the layer to the marker layer.
-        marker_line.setPlacement(QgsMarkerLineSymbolLayer.CentralPoint)
-        marker_line.setSubSymbol(marker)
-
-        # Finally replace the symbol layer in the base style.
-        line.changeSymbolLayer(0, marker_line)
-
         # Add the style to the line layer.        
-        renderer = QgsSingleSymbolRenderer(line)
+        # renderer = QgsSingleSymbolRenderer(line)
+        rangeList = self._get_renderer_range_list(layer_type='arrow') 
+
+        renderer = QgsGraduatedSymbolRenderer('arrows', rangeList) 
+
+        myClassificationMethod = QgsApplication.classificationMethodRegistry().method("EqualInterval")
+        renderer.setClassificationMethod(myClassificationMethod)
+
+        renderer.setClassAttribute('weight')  
+        # renderer.setSourceSymbol(line)  
+
         self.arrowLayer.setRenderer(renderer)
         self.arrowLayer.triggerRepaint()
 
@@ -590,6 +620,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             # self.arrowLayer.setFlags(QgsMapLayer.Private)
             self.arrowProvider = self.arrowLayer.dataProvider()
             self.arrowLayer.startEditing()
+
+            self.arrowProvider.addAttributes([
+                QgsField('weight', QVariant.Double)
+            ])
 
             for edge in self._edges:
                 self._draw_arrow(edge)
