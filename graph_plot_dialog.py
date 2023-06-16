@@ -397,7 +397,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             simple_marker.setFillColor(QColor.fromHsl(200, 255, 31))
             # simple_marker.setOutlineColor(QColor("transparent"))
             # simple_marker.setStrokeWidth(0)
-            simple_marker.setStrokeStyle(0)
+            simple_marker.setStrokeStyle(0) # No line
 
             # The marker has its own symbol layer.
             marker = QgsMarkerSymbol()
