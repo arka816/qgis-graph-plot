@@ -127,6 +127,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             QgsProject.instance().removeAllMapLayers()
         except:
             pass
+        else:
+            self.log_box.append("removed all layers")
     
     def _select_csv_file(self):
         csv_file_path, _ = QFileDialog.getOpenFileName(self, "choose csv file", "", "*.csv")
@@ -327,9 +329,11 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
                 float(thickness)
             ])
 
-        provider.addFeatures([seg])
+        _, edgeFeatures = provider.addFeatures([seg])
 
-        edge['segments'] = seg.id()
+        edge['id'] = edgeFeatures[-1].id()
+
+        # self.log_box.append(f"added edge feature {edgeFeatures[-1].id()}")
 
     def _set_edge_renderer(self):
         '''
@@ -549,8 +553,6 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             QgsProject.instance().addMapLayer(self.arrowLayer, False)
             self.layer_group.insertLayer(0, self.arrowLayer)
             
-
-
             iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
     def _handle_edge_selection(self):
@@ -558,18 +560,22 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # find selected edge
         if len(selected_edges) > 0:
-            for feature in selected_edges[0:1]:
-                attrs = feature.attributes()
-                src, dest, weight = attrs
+            feature = selected_edges[0]
 
-                self._selected_edge_index, self._selected_edge = list(filter(
-                    lambda edge: (edge[1]['from'] == src) & (edge[1]['to'] == dest), 
-                    enumerate(self._edges))
-                )[0]
+            id = feature.id()
 
-                self._selected_edge = deepcopy(self._selected_edge)
-                
-                self._start_edit()
+            self._selected_edge_index, self._selected_edge = list(filter(
+                lambda edge: edge[1]['id'] == id, 
+                enumerate(self._edges))
+            )[0]
+
+            self._selected_edge_id = self._selected_edge['id']
+
+            self.log_box.append(f"selected edge: {self._selected_edge_id}")
+
+            self._selected_edge = deepcopy(self._selected_edge)
+            
+            self._start_edit()
 
     def _set_layer_opacity(self, layer, opacity=100):
         try:
@@ -596,12 +602,14 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         iface.actionVertexToolActiveLayer().trigger()
 
     def _start_edit(self):
+        # self.log_box.append(f"edit mode: {self._EDITMODE}")
+
         ctrl_pts = self._selected_edge['ctrl_pts']
 
         src = self._selected_edge['from']
         dest = self._selected_edge['to']
 
-        self.log_box.append(f"editing edge {self._selected_edge_index} from: {src} -> {dest}")
+        self.log_box.append(f"editing edge {self._selected_edge_id} from: {src} -> {dest}")
 
         # reduce opacity of original layers
         self._set_layer_opacity(self.nodeLayer, 15)
@@ -616,7 +624,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.bezierCtrlProvider = self.bezierCtrlLayer.dataProvider()
         self.bezierCtrlLayer.startEditing()
 
-        for index, row in ctrl_pts.iterrows():
+        # draw markers for intermediate bezier points
+        for _, row in ctrl_pts.iloc[1:-1, :].iterrows():
             node = QgsFeature()
             node.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(row['lng'], row['lat'])))
             self.bezierCtrlProvider.addFeatures([node])
@@ -637,10 +646,11 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         QgsProject.instance().addMapLayer(self.bezierCurveLayer, False)
         self.layer_group.insertLayer(0, self.bezierCurveLayer)
 
-        self._start_bezier_edit()
-
+        # connect control point updated event to handler function
         if not self._EDITMODE:
             self.bezierCtrlLayer.geometryChanged.connect(self._control_point_updated)
+
+        self._start_bezier_edit()
 
         self._EDITMODE = True
 
@@ -653,17 +663,19 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         new_lng, new_lat = new_geom.asPoint().x(), new_geom.asPoint().y()
 
         # check if anchor points using id
-        anchor_pts = [1, ctrl_pts.shape[0]]
+        # anchor_pts = [1, ctrl_pts.shape[0]]
+        anchor_pts = []
+
         if id in anchor_pts:
             # undo moved marker
             # this causes geometry change to same layer
             # and triggers this function
             # solution: unlink handler before commiting changes and then link again
 
-            
 
-            # unlink handler
+            # unlink handler and halt edit mode to protect from commits
             self.bezierCtrlLayer.geometryChanged.disconnect(self._control_point_updated)
+            self._EDITMODE = False
 
             # throw warning
             QMessageBox.warning(self, "Error", "cannot move anchor vertex")
@@ -671,20 +683,29 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             # translate marker back to original coordinates
             utils = QgsVectorLayerEditUtils(self.bezierCtrlLayer)
 
-            utils.translateFeature(id, orig_lng - new_lng, orig_lat - new_lat)
+            # del_lng = orig_lng - new_lng
+            # del_lat = orig_lat - new_lat
+
+            # self.log_box.append(f"{del_lng:.4f} {del_lat:.4f}")
+
+            # utils.translateFeature(id, del_lng, del_lat)
+
+            utils.moveVertex(orig_lng, orig_lat, id, 0)
+
             self.bezierCtrlLayer.commitChanges()
 
             self._start_bezier_edit()
 
-            # relink handler
+            # relink handler and restart edit mode
             self.bezierCtrlLayer.geometryChanged.connect(self._control_point_updated)
+            self._EDITMODE = True
 
             return
 
 
         # update control points
-        ctrl_pts.loc[ctrl_pts.index[id - 1], 'lng'] = new_lng
-        ctrl_pts.loc[ctrl_pts.index[id - 1], 'lat'] = new_lat
+        ctrl_pts.loc[ctrl_pts.index[id], 'lng'] = new_lng
+        ctrl_pts.loc[ctrl_pts.index[id], 'lat'] = new_lat
 
         pts = self._bezier_curve(ctrl_pts)
 
@@ -707,31 +728,41 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         if not self._EDITMODE:
             return
         
-        # update edges
-        self._edges[self._selected_edge_index] = self._selected_edge
+        self._EDITED = False
+        self._EDITMODE = False
+
+        self.log_box.append(f"commiting update to edge: {self._selected_edge_id} among {len(self._edges)} edges")
+        
 
         # re-plot original edge layer
         self.edgeLayer.startEditing()
 
         # Step 1: delete edited edge
-        self.edgeLayer.deleteFeatures([self._selected_edge_index + 1])
+        self.edgeLayer.deleteFeatures([self._selected_edge_id])
 
         # Step 2: redraw edge
         self._draw_edge(self._selected_edge, self.edgeProvider)
 
+        # update edges
+        self._edges[self._selected_edge_index] = self._selected_edge
+
         self.edgeLayer.commitChanges()
+
+        # self.log_box.append("committed changes to edge layer")
 
 
         # re-plot original arrow layer
         self.arrowLayer.startEditing()
 
         # Step 1: delete edited arrow
-        self.arrowLayer.deleteFeatures([self._selected_edge_index + 1])
+        self.arrowLayer.deleteFeatures([self._selected_edge_id])
 
         # Step 2: redraw arrow
         self._draw_arrow(self._selected_edge)
 
         self.arrowLayer.commitChanges()
+
+        # self.log_box.append("committed changes to arrow layer")
 
 
         # return opacity of original layers to normal
@@ -739,9 +770,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self._set_layer_opacity(self.edgeLayer, 100)
         self._set_layer_opacity(self.arrowLayer, 100)
 
+        # set current layer to edge Layer
+        # Note that this triggers commitChanges
+        iface.layerTreeView().setCurrentLayer(self.edgeLayer)
+
         # remove bezier layers
         QgsProject.instance().removeMapLayers([self.bezierCtrlLayer.id(), self.bezierCurveLayer.id()])
-
-        self._EDITED = False
-        self._EDITMODE = False
-
