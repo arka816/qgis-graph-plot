@@ -88,7 +88,18 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
     _THRESHOLD = 0
     _THRESHOLD_UNIT = 1000.0
 
-    _selected_cell = None
+
+    # Table colors
+    _DELETED_BACKGROUND = QColor(255, 235, 156)
+    _DELETED_FOREGOUND = QBrush(QColor(156, 101, 0))
+                                 
+    _FILTERED_BACKGROUND = QColor(255, 199, 206)
+    _FILTERED_FOREGROUND = QBrush(QColor(156, 0, 6))
+
+    _DEFAULT_BACKGROUND = None
+    _DEFAULT_FOREGROUND = None
+
+    _selected_cell_pos = None
 
 
     def __init__(self, parent=None):
@@ -160,11 +171,24 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def _table_cell_clicked(self, row, col):
         self.log_box.append(f"{row}, {col} clicked")
-        self._selected_cell = self.adjacency_table.item(row, col)
+
+        if np.isnan(self.adj.iloc[row, col]) or row == col:
+            return
+
+        self._selected_cell_pos = (row, col)
+
+        # change delete button text based on whether already deleted edge
+        flag = self.adj_mask.iloc[row, col]
+
+        if flag:
+            self.del_edge_btn.setText("DELETE EDGE")
+        else:
+            self.del_edge_btn.setText("REDRAW EDGE")
 
     def _remove_layers(self):
         try:
-            QgsProject.instance().removeAllMapLayers()
+            # QgsProject.instance().removeAllMapLayers()
+            self.layer_tree_root.removeChildNode(self.layer_group)
         except:
             pass
         else:
@@ -196,31 +220,48 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         table.setHorizontalHeaderLabels(cols)
         table.setVerticalHeaderLabels(rows)
 
-        i = 0
-        for row in df.index:
-            j = 0
-            for col in df.columns:
-                val = df.loc[row, col]
+        
+        for i in range(df.shape[0]):
+            for j in range(df.shape[1]):
+                val = df.iloc[i, j]
 
                 cell = QTableWidgetItem(val)
                 cell.setFlags(QtCore.Qt.ItemIsEnabled)
+
+                if not self._DEFAULT_BACKGROUND:
+                    self._DEFAULT_BACKGROUND = cell.background()
+                if not self._DEFAULT_FOREGROUND:
+                    self._DEFAULT_FOREGROUND = cell.foreground()
                 
-                if val == 'nan':
-                    cell.setBackground(QColor(255, 199, 206))
-                    cell.setForeground(QBrush(QColor(156, 0, 6)))
+                if not self.adj_mask.iloc[i, j]:
+                    cell.setBackground(self._FILTERED_BACKGROUND)
+                    cell.setForeground(self._FILTERED_FOREGROUND)
 
                 table.setItem(i, j, cell)
-                j += 1
-            i += 1
 
         table.show()
 
     def _delete_edge(self):
-        if self._selected_cell is not None and self._selected_cell.text() != 'nan':
-            self._selected_cell.setBackground(QColor(255, 235, 156))
-            self._selected_cell.setForeground(QBrush(QColor(156, 101, 0)))
+        if self._selected_cell_pos is None:
+            return
+        
+        row, col = self._selected_cell_pos
+        cell = self.adjacency_table.item(row, col)
+        flag = self.adj_mask.iloc[row, col]
 
-        # 
+        if flag:
+            # to delete
+            self.adj_mask.iloc[row, col] = False        
+            cell.setBackground(self._DELETED_BACKGROUND)
+            cell.setForeground(self._DELETED_FOREGOUND)
+        else:
+            # to redraw
+            self.adj_mask.iloc[row, col] = True        
+            cell.setBackground(self._DEFAULT_BACKGROUND)
+            cell.setForeground(self._DEFAULT_FOREGROUND)
+        
+        self.plot()
+        self._selected_cell_pos = None
 
     def _qgis_assert(self, statement):
         '''
@@ -246,10 +287,14 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             # normalize
             self.adj = self.adj.div(self.adj.sum(axis=1), axis=0)
 
-            self._write_table(self.adj.copy(deep=True))
+            # create mask
+            self.adj_mask = ~pd.isna(self.adj)
 
-            # backup original data
-            self.adj_backup = self.adj.copy(deep=True)
+            # do not plot diagonals by default
+            for i in range(self.adj.shape[0]):
+                self.adj_mask.iloc[i, i] = False
+
+            self._write_table(self.adj.copy(deep=True))
 
     def _bernstein_polynomial(self, t, pts):
         if pts.shape[0] == 4:
@@ -302,8 +347,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         for i in self.adj.index:
             for j in self.adj.columns:
-                weight = self.adj.loc[i, j]
-                if not np.isnan(weight) and i != j:
+                if self.adj_mask.loc[i, j]:
                     g.edge(i, j, penwidth="0.01", arrowhead="none")
 
         g.save(os.path.join(localdir, 'graph'))
@@ -564,7 +608,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             self.log_box.append(f"{self._THRESHOLD}")
 
             # consider only weights with weight within [THRESHOLD, 1]
-            self.adj = self.adj_backup.where(self.adj_backup >= self._THRESHOLD, np.nan, inplace=False)
+            self.adj_mask = self.adj_mask & (self.adj >= self._THRESHOLD)
 
             # fetch edges
             self._get_edges()

@@ -64,7 +64,7 @@ class Ui_GraphPlotDialogBase(object):
         self.threshold_label.setGeometry(QtCore.QRect(620, 680, 61, 31))
         self.threshold_label.setObjectName("threshold_label")
         self.del_edge_btn = QtWidgets.QPushButton(GraphPlotDialogBase)
-        self.del_edge_btn.setGeometry(QtCore.QRect(520, 630, 171, 31))
+        self.del_edge_btn.setGeometry(QtCore.QRect(470, 630, 221, 31))
         self.del_edge_btn.setObjectName("del_edge_btn")
 
         self.retranslateUi(GraphPlotDialogBase)
