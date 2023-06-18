@@ -284,9 +284,6 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             self.adj.index = self.adj.index.map(str)
             self.adj.columns = self.adj.columns.astype(str)
 
-            # normalize
-            self.adj = self.adj.div(self.adj.sum(axis=1), axis=0)
-
             # create mask
             self.adj_mask = ~pd.isna(self.adj)
 
@@ -295,6 +292,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.adj_mask.iloc[i, i] = False
 
             self._write_table(self.adj.copy(deep=True))
+
+            # normalize
+            self.adj = self.adj.div(self.adj.sum(axis=1), axis=0)
 
     def _bernstein_polynomial(self, t, pts):
         if pts.shape[0] == 4:
@@ -366,7 +366,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             self.log_box.append(str(ex))
 
 
-        g = pydot.graph_from_dot_file(os.path.join(localdir, 'graph.dot'))[0]
+        try:
+            g = pydot.graph_from_dot_file(os.path.join(localdir, 'graph.dot'))[0]
+        except Exception as ex:
+            self.log_box.append(str(ex))
 
         edges = []
 
@@ -522,13 +525,16 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.edgeProvider.addFeatures([curve]) 
         
-    def _draw_edge_labels(self):
+    def _draw_edge_labels(self, opacity=100):
+        self.edgeLayer.setLabelsEnabled(False)
+        self.edgeLayer.triggerRepaint()
+
         # TODO: customise more
         layer_settings  = QgsPalLayerSettings()
 
         text_format = QgsTextFormat()
         text_format.setFont(QFont("Arial", 7))
-        text_format.setColor(QColor.fromHsl(200, 255, 31))
+        text_format.setColor(QColor.fromHsl(200, 255, 31, alpha=int(opacity * 2.55)))
         text_format.setSize(7)
 
         # buffer_settings = QgsTextBufferSettings()
@@ -741,6 +747,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self._set_layer_opacity(self.edgeLayer, 15)
         self._set_layer_opacity(self.arrowLayer, 15)
 
+        # erase the edge labels
+        self.edgeLayer.setLabelsEnabled(False)
+        self.edgeLayer.triggerRepaint()
+
         # TODO: move these layers to an edit node in the layertree
 
         # create bezier control point layer
@@ -895,9 +905,22 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self._set_layer_opacity(self.edgeLayer, 100)
         self._set_layer_opacity(self.arrowLayer, 100)
 
+        # redraw the edge labels
+        self._draw_edge_labels(opacity=100)
+
         # set current layer to edge Layer
         # Note that this triggers commitChanges
         iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
         # remove bezier layers
         QgsProject.instance().removeMapLayers([self.bezierCtrlLayer.id(), self.bezierCurveLayer.id()])
+
+        # garbage cleanup
+        del self._selected_edge
+        del self._selected_edge_id 
+        del self._selected_edge_index
+ 
+        del self.bezierCtrlLayer
+        del self.bezierCtrlProvider
+        del self.bezierCurveLayer
+        del self.bezierCurveProvider

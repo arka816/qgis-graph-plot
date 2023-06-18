@@ -9,12 +9,6 @@ digraph G {
 	edge [headclip=false,
 		tailclip=false
 	];
-	-1	[fixedsize=true,
-		height=0.02,
-		label="",
-		penwidth=0.01,
-		pos="7.8088,5.8488",
-		width=0.01];
 	1	[fixedsize=true,
 		height=0.02,
 		label="",
