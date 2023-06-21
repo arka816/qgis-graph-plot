@@ -32,7 +32,6 @@ import numpy as np
 import os
 import subprocess
 from copy import deepcopy
-import time
 
 import graphviz
 import pydot
@@ -41,23 +40,19 @@ from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QSlider
 import PyQt5.QtCore as QtCore
-from qgis.PyQt.QtCore import QVariant, Qt
+from qgis.PyQt.QtCore import QVariant
 from qgis.core import QgsApplication, \
     QgsVectorLayer, QgsFeature, QgsGeometry, \
     QgsPoint, QgsPointXY, QgsLineString, \
     QgsProject, QgsField, QgsSymbol, \
-    QgsRendererCategory, QgsCategorizedSymbolRenderer, QgsGraduatedSymbolRenderer, \
+    QgsGraduatedSymbolRenderer, \
     QgsLineSymbol, \
-    QgsRendererRange, QgsClassificationRange, \
-    QgsClassificationEqualInterval, QgsStyle, QgsRendererRangeLabelFormat, \
-    edit, \
-    QgsFeatureRequest, QgsVectorLayerEditUtils, \
-    QgsPalLayerSettings, QgsTextFormat, QgsTextBufferSettings, QgsVectorLayerSimpleLabeling, QgsLabeling, \
-    QgsSingleSymbolRenderer, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayerBase, QgsSimpleMarkerSymbolLayer, QgsMarkerLineSymbolLayer, \
-    QgsMapLayer
+    QgsRendererRange, QgsVectorLayerEditUtils, \
+    QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayerBase, QgsSimpleMarkerSymbolLayer, QgsMarkerLineSymbolLayer
 
 from qgis.PyQt.QtGui import QColor, QFont, QBrush
 from qgis.utils import iface
+
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -87,6 +82,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
     _THRESHOLD = 0
     _THRESHOLD_UNIT = 1000.0
+
+    # are bezier control points for edges given as input
+    _edge_input = False
 
 
     # Table colors
@@ -124,7 +122,12 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.adj_csv_loader.clicked.connect(self._select_adj_file)
         self.coords_csv_loader.clicked.connect(self._select_coords_file)
-        self.load_data_btn.clicked.connect(self.start)
+        self.dot_file_loader.clicked.connect(self._select_dot_file)
+        self.dot_file_saver.clicked.connect(self._select_save_file)
+        self.load_edges_btn.clicked.connect(self._load_edges)
+        self.load_vertices_btn.clicked.connect(self._load_vertices)
+        self.load_graph_btn.clicked.connect(self.load_graph)
+        self.save_graph_btn.clicked.connect(self.save_graph)
         self.plot_btn.clicked.connect(self.plot)
         self.commit_btn.clicked.connect(self._commit_edits)
         self.close_layers_btn.clicked.connect(self._remove_layers)
@@ -135,7 +138,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.elem_config_map = {
             "ADJ_FILE": self.adj_file_path,
-            "COORDS_FILE": self.coords_file_path
+            "COORDS_FILE": self.coords_file_path,
+            "DOT_FILE": self.dot_file_path,
+            "SAVE_FILE": self.save_file_path
         }
 
         # load saved input
@@ -201,6 +206,14 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
     def _select_coords_file(self):
         coords_file_path, _ = QFileDialog.getOpenFileName(self, "choose csv file", "", "*.csv")
         self.coords_file_path.setText(coords_file_path)
+
+    def _select_dot_file(self):
+        dot_file_path, _ = QFileDialog.getOpenFileName(self, "choose dot file", "", "*.dot")
+        self.dot_file_path.setText(dot_file_path)
+
+    def _select_save_file(self):
+        save_file_path, _ = QFileDialog.getSaveFileName(self, "choose dot file", "", "*.dot")
+        self.save_file_path.setText(save_file_path)
 
     def _write_table(self, df):
         df = df.astype(str)
@@ -269,7 +282,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         '''
         pass
 
-    def start(self):
+    def _load_edges(self):
         # adj_file_path = 'C:/Users/arka/Documents/summer 23/transition_matrix.csv'
         # adj_file_path = 'C:/Users/arka/Documents/summer 23/transition_matrix - Copy.csv'
         
@@ -295,6 +308,67 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
             # normalize
             self.adj = self.adj.div(self.adj.sum(axis=1), axis=0)
+
+            self._edge_input = False
+
+    def _load_vertices(self):
+        # coords_file_path = 'C:/Users/arka/Documents/summer 23/clusters.csv'
+        coords_file_path = self.coords_file_path.text()
+
+        if os.path.isfile(coords_file_path):
+            self.clusters = pd.read_csv(coords_file_path, index_col=[0])
+
+            self.minLng = self.clusters['lng'].min()
+            self.minLat = self.clusters['lat'].min()
+
+            self.maxLng = self.clusters['lng'].max()
+            self.maxLat = self.clusters['lat'].max()
+
+
+            self.scaleLng = 1 / (self.maxLng - self.minLng)
+            self.scaleLat = 1 / (self.maxLat - self.minLat)
+
+            self._coords_scale = max(self.scaleLng, self.scaleLat) * 10
+
+    def load_graph(self):
+        '''
+            load data from dot file
+        '''
+        try:
+            g = pydot.graph_from_dot_file(self.dot_file_path.text())[0]
+        except Exception as ex:
+            self.log_box.append(f"failed to load graph. {ex}")
+
+        edges = []
+
+        for edge in g.get_edge_list():
+            source, destination = edge.get_source(), edge.get_destination()
+
+            pos = edge.get_attributes()['pos']
+            control_points = pd.DataFrame(
+                [
+                    [float(coord) for coord in coords.split(',')] 
+                    for coords in pos.strip('"').split()
+                ], 
+                columns=['lng', 'lat']
+            )
+
+            control_points['lng'] = control_points['lng'] / self._coords_scale + self.minLng
+            control_points['lat'] = control_points['lat'] / self._coords_scale + self.minLat
+
+            pts = self._bezier_curve(control_points)
+
+            edges.append({
+                'from': source, 
+                'to': destination, 
+                'ctrl_pts': control_points,
+                'path': pts,
+                'weight': self.adj.loc[source, destination]
+            })
+
+        self._edges = edges
+
+        self._edge_input = True
 
     def _bernstein_polynomial(self, t, pts):
         if pts.shape[0] == 4:
@@ -323,24 +397,12 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         g.edge_attr = {'headclip': 'false', 'tailclip': 'false'}
 
-        minLng = self.clusters['lng'].min()
-        minLat = self.clusters['lat'].min()
-
-        maxLng = self.clusters['lng'].max()
-        maxLat = self.clusters['lat'].max()
-
-
-        scaleLng = 1 / (maxLng - minLng)
-        scaleLat = 1 / (maxLat - minLat)
-
-        self._coords_scale = max(scaleLng, scaleLat) * 10
-
         for cluster in self.clusters.index:
             lng = self.clusters.loc[cluster, 'lng']
             lat = self.clusters.loc[cluster, 'lat']
 
-            lng = (lng - minLng) * self._coords_scale
-            lat = (lat - minLat) * self._coords_scale
+            lng = (lng - self.minLng) * self._coords_scale
+            lat = (lat - self.minLat) * self._coords_scale
 
             
             g.node(str(cluster), pos=f"{lng},{lat}!", fixedsize='true', width='0.0', height='0.0', label='', penwidth="0.01")
@@ -385,8 +447,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
                 columns=['lng', 'lat']
             )
 
-            control_points['lng'] = control_points['lng'] / self._coords_scale + minLng
-            control_points['lat'] = control_points['lat'] / self._coords_scale + minLat
+            control_points['lng'] = control_points['lng'] / self._coords_scale + self.minLng
+            control_points['lat'] = control_points['lat'] / self._coords_scale + self.minLat
 
             pts = self._bezier_curve(control_points)
 
@@ -600,91 +662,106 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
     def plot(self):
         self._remove_layers()
 
-        # coords_file_path = 'C:/Users/arka/Documents/summer 23/clusters.csv'
-        coords_file_path = self.coords_file_path.text()
-
         # TODO: replace startEditing...commitChanges with edit() [from qgis.core import edit]
 
-        if os.path.isfile(coords_file_path):
-            self.clusters = pd.read_csv(coords_file_path, index_col=[0])
+        # get edge weight threshold
+        self._THRESHOLD = self.edge_thres_slider.value() / self._THRESHOLD_UNIT
 
-            # get edge weight threshold
-            self._THRESHOLD = self.edge_thres_slider.value() / self._THRESHOLD_UNIT
+        self.log_box.append(f"{self._THRESHOLD}")
 
-            self.log_box.append(f"{self._THRESHOLD}")
+        # consider only weights with weight within [THRESHOLD, 1]
+        self.adj_mask = self.adj_mask & (self.adj >= self._THRESHOLD)
 
-            # consider only weights with weight within [THRESHOLD, 1]
-            self.adj_mask = self.adj_mask & (self.adj >= self._THRESHOLD)
-
-            # fetch edges
+        # fetch edges
+        if not self._edge_input:
             self._get_edges()
 
-            self.layer_tree_root = QgsProject.instance().layerTreeRoot()
-            self.layer_group = self.layer_tree_root.addGroup('graph_plot')
+        self.layer_tree_root = QgsProject.instance().layerTreeRoot()
+        self.layer_group = self.layer_tree_root.addGroup('graph_plot')
 
-            # NODE LAYER
-            self.nodeLayer = QgsVectorLayer("Point?crs=epsg:4326", "cluster markers", "memory")
-            self.nodeProvider = self.nodeLayer.dataProvider()
-            self.nodeLayer.startEditing()
+        # NODE LAYER
+        self.nodeLayer = QgsVectorLayer("Point?crs=epsg:4326", "cluster markers", "memory")
+        self.nodeProvider = self.nodeLayer.dataProvider()
+        self.nodeLayer.startEditing()
 
-            for _, row in self.clusters.iterrows():
-                node = QgsFeature()
-                node.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(row['lng'], row['lat'])))
-                self.nodeProvider.addFeatures([node])
+        for _, row in self.clusters.iterrows():
+            node = QgsFeature()
+            node.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(row['lng'], row['lat'])))
+            self.nodeProvider.addFeatures([node])
 
-            self.log_box.append(f"added {len(self.clusters)} features")
+        self.log_box.append(f"added {len(self.clusters)} features")
 
-            self.nodeLayer.commitChanges()
-            QgsProject.instance().addMapLayer(self.nodeLayer, False)
-            self.layer_group.addLayer(self.nodeLayer)
+        self.nodeLayer.commitChanges()
+        QgsProject.instance().addMapLayer(self.nodeLayer, False)
+        self.layer_group.addLayer(self.nodeLayer)
 
-            # EDGE LAYER
-            # TODO: convert to multilinestring
-            self.edgeLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'edges', 'memory')
-            self.edgeProvider = self.edgeLayer.dataProvider()
-            self.edgeLayer.startEditing()
+        # TO TAKE A SCREENSHOT
+        self.nodeLayer.selectionChanged.connect(self._take_screenshot)
 
-            self.edgeProvider.addAttributes([
-                QgsField('from', QVariant.String),
-                QgsField('to', QVariant.String),
-                QgsField('weight', QVariant.Double)
-            ])
+        # EDGE LAYER
+        # TODO: convert to multilinestring
+        self.edgeLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'edges', 'memory')
+        self.edgeProvider = self.edgeLayer.dataProvider()
+        self.edgeLayer.startEditing()
 
-            self.log_box.append(str(QgsSymbol.defaultSymbol(self.edgeLayer.geometryType()).width()))
+        self.edgeProvider.addAttributes([
+            QgsField('from', QVariant.String),
+            QgsField('to', QVariant.String),
+            QgsField('weight', QVariant.Double)
+        ])
 
-            for edge in self._edges:
-                self._draw_edge(edge, self.edgeProvider)
+        self.log_box.append(str(QgsSymbol.defaultSymbol(self.edgeLayer.geometryType()).width()))
 
-            self._set_edge_renderer()
+        for edge in self._edges:
+            self._draw_edge(edge, self.edgeProvider)
 
-            self._draw_edge_labels()
-            
-            self.edgeLayer.commitChanges()
-            QgsProject.instance().addMapLayer(self.edgeLayer, False)
-            self.layer_group.addLayer(self.edgeLayer)
+        self._set_edge_renderer()
 
-            self.edgeLayer.selectionChanged.connect(self._handle_edge_selection)
+        self._draw_edge_labels()
+        
+        self.edgeLayer.commitChanges()
+        QgsProject.instance().addMapLayer(self.edgeLayer, False)
+        self.layer_group.addLayer(self.edgeLayer)
 
-            # ARROW LAYER
-            self.arrowLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'arrow', 'memory')
-            # self.arrowLayer.setFlags(QgsMapLayer.Private)
-            self.arrowProvider = self.arrowLayer.dataProvider()
-            self.arrowLayer.startEditing()
+        # TO START EDITING
+        self.edgeLayer.selectionChanged.connect(self._handle_edge_selection)
 
-            self.arrowProvider.addAttributes([
-                QgsField('weight', QVariant.Double)
-            ])
+        # ARROW LAYER
+        self.arrowLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'arrow', 'memory')
+        # self.arrowLayer.setFlags(QgsMapLayer.Private)
+        self.arrowProvider = self.arrowLayer.dataProvider()
+        self.arrowLayer.startEditing()
 
-            for edge in self._edges:
-                self._draw_arrow(edge)
+        self.arrowProvider.addAttributes([
+            QgsField('weight', QVariant.Double)
+        ])
 
-            self._set_arrow_renderer()
+        for edge in self._edges:
+            self._draw_arrow(edge)
 
-            self.arrowLayer.commitChanges()
-            QgsProject.instance().addMapLayer(self.arrowLayer, False)
-            self.layer_group.insertLayer(0, self.arrowLayer)
-            
-            iface.layerTreeView().setCurrentLayer(self.edgeLayer)
+        self._set_arrow_renderer()
+
+        self.arrowLayer.commitChanges()
+        QgsProject.instance().addMapLayer(self.arrowLayer, False)
+        self.layer_group.insertLayer(0, self.arrowLayer)
+        
+        iface.layerTreeView().setCurrentLayer(self.edgeLayer)
+
+    def _take_screenshot(self, *args):
+        # take screenshot
+        # currently takes screenshot by grabbing data from screen
+        # TODO: use gdal to rasterize layers and produce image from bitmap in later versions
+
+        # W, S, E, N
+        rect = self.nodeLayer.boundingBoxOfSelected()
+
+        self.log_box.append(f"taking screenshot of {rect}")
+
+        path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
+        if ok:
+            self.log_box.append(path)
+        else:
+            self.log_box.append("screenshot failed")
 
     def _handle_edge_selection(self):
         selected_edges = self.edgeLayer.selectedFeatures()
@@ -924,3 +1001,55 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         del self.bezierCtrlProvider
         del self.bezierCurveLayer
         del self.bezierCurveProvider
+
+    def save_graph(self):
+        '''
+            save data as dot file
+        '''
+        self.log_box.append("flushing data to graph file")
+
+        output_path = self.save_file_path.text()
+
+        graph_attrs_orig = {'splines': 'true', 'pad': '0', 'margin': '0', 'notranslate': 'true'}
+        g = graphviz.Digraph('G', filename='graph', graph_attr=graph_attrs_orig)
+
+        g.edge_attr = {'headclip': 'false', 'tailclip': 'false'}
+
+        self.minLng = self.clusters['lng'].min()
+        self.minLat = self.clusters['lat'].min()
+
+        self.maxLng = self.clusters['lng'].max()
+        self.maxLat = self.clusters['lat'].max()
+
+
+        self.scaleLng = 1 / (self.maxLng - self.minLng)
+        self.scaleLat = 1 / (self.maxLat - self.minLat)
+
+        self._coords_scale = max(self.scaleLng, self.scaleLat) * 10
+
+        for cluster in self.clusters.index:
+            lng = self.clusters.loc[cluster, 'lng']
+            lat = self.clusters.loc[cluster, 'lat']
+
+            lng = (lng - self.minLng) * self._coords_scale
+            lat = (lat - self.minLat) * self._coords_scale
+
+            g.node(str(cluster), pos=f"{lng},{lat}!", fixedsize='true', width='0.0', height='0.0', label='', penwidth="0.01")
+
+        for edge in self._edges:
+            pos = []
+
+            for _, row in edge['ctrl_pts'].iterrows():
+                lng, lat = row['lng'], row['lat']
+
+                lng = (lng - self.minLng) * self._coords_scale
+                lat = (lat - self.minLat) * self._coords_scale
+
+                pos.append(f"{lng},{lat}")
+
+            pos = " ".join(pos)
+            g.edge(edge['from'], edge['to'], penwidth="0.01", arrowhead="none", pos=pos)
+
+        g.save(output_path)
+
+        self.log_box.append("flushed data to graph file")
