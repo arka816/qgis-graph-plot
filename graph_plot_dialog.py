@@ -50,7 +50,8 @@ from qgis.core import QgsApplication, \
     QgsGraduatedSymbolRenderer, \
     QgsLineSymbol, \
     QgsRendererRange, QgsVectorLayerEditUtils, \
-    QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayerBase, QgsSimpleMarkerSymbolLayer, QgsMarkerLineSymbolLayer
+    QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayerBase, QgsSimpleMarkerSymbolLayer, QgsMarkerLineSymbolLayer, \
+    QgsMapRendererParallelJob
 
 from qgis.PyQt.QtGui import QColor, QFont, QBrush
 from qgis.utils import iface
@@ -143,6 +144,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.commit_btn.clicked.connect(self._commit_edits)
         self.close_layers_btn.clicked.connect(self._remove_layers)
         self.del_edge_btn.clicked.connect(self._delete_edge)
+        self.screenshot_btn.clicked.connect(self._take_screenshot)
         self.adjacency_table.cellClicked.connect(self._table_cell_clicked)
 
         iface.layerTreeView().currentLayerChanged.connect(self._commit_edits)
@@ -794,42 +796,41 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
     def _take_screenshot(self, *args):
-        return
         # take screenshot
         # currently takes screenshot by grabbing data from screen
         # TODO: use gdal to rasterize layers and produce image from bitmap in later versions
 
         # W, S, E, N
-        # rect = self.nodeLayer.boundingBoxOfSelected()
+        rect = self.nodeLayer.boundingBoxOfSelected()
 
-        # self.log_box.append(f"taking screenshot of {rect}")
+        self.log_box.append(f"taking screenshot of {rect}")
 
-        # # create Qt mapCanvas widget
-        # canvas = QgsMapCanvas()
-        # canvas.setCanvasColor(QColor.white)
-        # canvas.enableAntiAliasing(True)
+        # create Qt mapCanvas widget
+        canvas = QgsMapCanvas()
+        canvas.setCanvasColor(QColor("white"))
+        canvas.enableAntiAliasing(True)
 
 
-        # # set extent of canvas as well as what layers you would like to display
-        # canvas.setExtent(self.nodeLayer.extent())
-        # canvas.setLayerSet([QgsMapCanvasLayer(layer)])
-        # canvas.refresh()
+        # set extent of canvas as well as what layers you would like to display
+        canvas.setExtent(self.nodeLayer.extent())
+        canvas.setLayers([self.nodeLayer])
+        canvas.refresh()
 
-        # # rendering my map canvas to tif image
-        # settings = canvas.mapSettings()
-        # settings.setLayers([layer.id()])
-        # job = QgsMapRendererParallelJob(settings)
-        # job.start()
-        # job.waitForFinished()
-        # image = job.renderedImage()
+        # rendering my map canvas to tif image
+        settings = canvas.mapSettings()
+        settings.setLayers([self.nodeLayer])
+        job = QgsMapRendererParallelJob(settings)
+        job.start()
+        job.waitForFinished()
+        image = job.renderedImage()
 
-        # path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
-        # if ok:
-        #     self.log_box.append(path)
-        # else:
-        #     self.log_box.append("screenshot failed")
+        path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
+        if ok:
+            self.log_box.append(path)
+        else:
+            self.log_box.append("screenshot failed")
 
-        # image.save(path)
+        image.save(path)
 
     def _handle_edge_selection(self):
         selected_edges = self.edgeLayer.selectedFeatures()
