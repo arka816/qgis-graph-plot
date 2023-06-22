@@ -36,6 +36,8 @@ from copy import deepcopy
 import graphviz
 import pydot
 
+import winsound
+
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QSlider
@@ -74,6 +76,13 @@ neato_exe = "C:\\Program Files\\Graphviz\\bin\\neato.exe"
 
 
 class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
+    # TODO: fix mutual cooperation between edge controls
+    #   - delete edges functionality
+    #   - pick heaviest n edges
+    #   - edge thresholding
+
+    # TODO: fix button controls (active/disabled)
+
     _edges = []
     _selected_edge = None
 
@@ -82,9 +91,6 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
     _THRESHOLD = 0
     _THRESHOLD_UNIT = 1000.0
-
-    # are bezier control points for edges given as input
-    _edge_input = False
 
 
     # Table colors
@@ -110,13 +116,17 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
 
+        winsound.PlaySound(
+            os.path.join(os.path.dirname(__file__), "music", "tb.wav"), 
+            winsound.SND_ASYNC | winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_NODEFAULT
+        )
+
         self.config_file_path = os.path.join(localdir, ".conf")
 
         # TODO: make labeled slider
         self.edge_thres_slider.setRange(0, self._THRESHOLD_UNIT)
         self.edge_thres_slider.setSingleStep(1)
         self.edge_thres_slider.setPageStep(1)
-        self.edge_thres_slider.setTickPosition(QSlider.TickPosition.TicksAbove)
         self.edge_thres_slider.valueChanged.connect(lambda value: self.threshold_label.setText(f"{(value / self._THRESHOLD_UNIT):.3f}"))
 
 
@@ -148,6 +158,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # connect to input saver
         self.rejected.connect(self._save_input)
+        self.rejected.connect(lambda *args: winsound.PlaySound(None, winsound.SND_ASYNC))
 
     def _save_input(self):
         try:
@@ -309,7 +320,32 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             # normalize
             self.adj = self.adj.div(self.adj.sum(axis=1), axis=0)
 
-            self._edge_input = False
+            # top edge slider
+            count = self.adj.shape[0] * self.adj.shape[1]
+            self.top_edge_slider.setRange(1, count)
+            self.top_edge_slider.setSingleStep(1)
+            self.top_edge_slider.setPageStep(1)
+
+            self.top_edge_slider.setValue(count)
+            self.top_edge_slider.repaint()
+
+            self.top_edge_label.setText(str(count))
+
+            self.top_edge_slider.valueChanged.connect(self._top_edge_slider_handler)
+
+    def _top_edge_slider_handler(self, value):
+        return
+    
+        self.top_edge_label.setText(str(value))
+
+        adj_np = self.adj.to_numpy()
+        adj_np = adj_np.ravel()
+
+        indices = np.argpartition(adj_np, -value)[-value:]
+        indices = [divmod(i, self.adj.shape[1]) for i in indices]
+
+        for i, j in indices:
+            self.adj_mask.iloc[i, j] &= True
 
     def _load_vertices(self):
         # coords_file_path = 'C:/Users/arka/Documents/summer 23/clusters.csv'
@@ -338,6 +374,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             g = pydot.graph_from_dot_file(self.dot_file_path.text())[0]
         except Exception as ex:
             self.log_box.append(f"failed to load graph. {ex}")
+        else:
+            self.log_box.append(f"loaded graph from dot file")
 
         edges = []
 
@@ -368,8 +406,6 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self._edges = edges
 
-        self._edge_input = True
-
     def _bernstein_polynomial(self, t, pts):
         if pts.shape[0] == 4:
             return  pts[0] * ((1 - t) ** 3) + \
@@ -385,6 +421,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         return pd.concat(pts, axis=1).T
 
     def _get_edges(self):
+        self.log_box.append("calculating edges...")
+
         graph_attrs = {
             'overlap': 'voronoi',
             'sep': '0',
@@ -670,10 +708,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.log_box.append(f"{self._THRESHOLD}")
 
         # consider only weights with weight within [THRESHOLD, 1]
-        self.adj_mask = self.adj_mask & (self.adj >= self._THRESHOLD)
+        self.adj_mask &= (self.adj >= self._THRESHOLD)
 
         # fetch edges
-        if not self._edge_input:
+        if self.calculate_edges.isChecked():
             self._get_edges()
 
         self.layer_tree_root = QgsProject.instance().layerTreeRoot()
@@ -957,7 +995,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # update edges
         self._edges[self._selected_edge_index] = self._selected_edge
-
+        
         self.edgeLayer.commitChanges()
 
         # self.log_box.append("committed changes to edge layer")
@@ -990,12 +1028,14 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
         # remove bezier layers
+        self.bezierCtrlLayer.geometryChanged.disconnect(self._control_point_updated)
         QgsProject.instance().removeMapLayers([self.bezierCtrlLayer.id(), self.bezierCurveLayer.id()])
+
 
         # garbage cleanup
         del self._selected_edge
         del self._selected_edge_id 
-        del self._selected_edge_index
+        # del self._selected_edge_index
  
         del self.bezierCtrlLayer
         del self.bezierCtrlProvider
@@ -1011,7 +1051,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         output_path = self.save_file_path.text()
 
         graph_attrs_orig = {'splines': 'true', 'pad': '0', 'margin': '0', 'notranslate': 'true'}
-        g = graphviz.Digraph('G', filename='graph', graph_attr=graph_attrs_orig)
+        g = graphviz.Digraph('G', graph_attr=graph_attrs_orig)
 
         g.edge_attr = {'headclip': 'false', 'tailclip': 'false'}
 

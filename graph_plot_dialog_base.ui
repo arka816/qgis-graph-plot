@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>742</width>
-    <height>672</height>
+    <height>714</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -19,7 +19,7 @@
      <x>10</x>
      <y>10</y>
      <width>721</width>
-     <height>651</height>
+     <height>691</height>
     </rect>
    </property>
    <property name="verticalScrollBarPolicy">
@@ -35,9 +35,9 @@
     <property name="geometry">
      <rect>
       <x>0</x>
-      <y>0</y>
+      <y>-500</y>
       <width>705</width>
-      <height>1149</height>
+      <height>1189</height>
      </rect>
     </property>
     <widget class="QGroupBox" name="groupBox">
@@ -331,7 +331,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>0</string>
+      <string>-</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_6">
@@ -370,14 +370,14 @@
       </rect>
      </property>
      <property name="text">
-      <string>0</string>
+      <string>-</string>
      </property>
     </widget>
     <widget class="QPushButton" name="plot_btn">
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>1070</y>
+       <y>1110</y>
        <width>331</width>
        <height>31</height>
       </rect>
@@ -390,7 +390,7 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>1070</y>
+       <y>1110</y>
        <width>331</width>
        <height>31</height>
       </rect>
@@ -403,7 +403,7 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>1110</y>
+       <y>1150</y>
        <width>331</width>
        <height>31</height>
       </rect>
@@ -416,18 +416,56 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>1110</y>
+       <y>1150</y>
        <width>331</width>
        <height>31</height>
       </rect>
      </property>
      <property name="text">
-      <string>SCREENSHOT</string>
+      <string>SCREENSHOT CANVAS</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="calculate_edges">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>1070</y>
+       <width>331</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Calculate edges?</string>
      </property>
     </widget>
    </widget>
   </widget>
  </widget>
+ <tabstops>
+  <tabstop>scrollArea</tabstop>
+  <tabstop>adj_file_path</tabstop>
+  <tabstop>adj_csv_loader</tabstop>
+  <tabstop>coords_file_path</tabstop>
+  <tabstop>coords_csv_loader</tabstop>
+  <tabstop>load_edges_btn</tabstop>
+  <tabstop>load_vertices_btn</tabstop>
+  <tabstop>dot_file_path</tabstop>
+  <tabstop>dot_file_loader</tabstop>
+  <tabstop>save_file_path</tabstop>
+  <tabstop>dot_file_saver</tabstop>
+  <tabstop>load_graph_btn</tabstop>
+  <tabstop>save_graph_btn</tabstop>
+  <tabstop>log_box</tabstop>
+  <tabstop>adjacency_table</tabstop>
+  <tabstop>del_edge_btn</tabstop>
+  <tabstop>edge_thres_slider</tabstop>
+  <tabstop>top_edge_slider</tabstop>
+  <tabstop>calculate_edges</tabstop>
+  <tabstop>plot_btn</tabstop>
+  <tabstop>commit_btn</tabstop>
+  <tabstop>close_layers_btn</tabstop>
+  <tabstop>screenshot_btn</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>
