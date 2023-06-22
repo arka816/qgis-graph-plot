@@ -794,41 +794,42 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
     def _take_screenshot(self, *args):
+        return
         # take screenshot
         # currently takes screenshot by grabbing data from screen
         # TODO: use gdal to rasterize layers and produce image from bitmap in later versions
 
         # W, S, E, N
-        rect = self.nodeLayer.boundingBoxOfSelected()
+        # rect = self.nodeLayer.boundingBoxOfSelected()
 
-        self.log_box.append(f"taking screenshot of {rect}")
+        # self.log_box.append(f"taking screenshot of {rect}")
 
-        # create Qt mapCanvas widget
-        canvas = QgsMapCanvas()
-        canvas.setCanvasColor(QColor.white)
-        canvas.enableAntiAliasing(True)
+        # # create Qt mapCanvas widget
+        # canvas = QgsMapCanvas()
+        # canvas.setCanvasColor(QColor.white)
+        # canvas.enableAntiAliasing(True)
 
 
-        # set extent of canvas as well as what layers you would like to display
-        canvas.setExtent(self.nodeLayer.extent())
-        canvas.setLayerSet([QgsMapCanvasLayer(layer)])
-        canvas.refresh()
+        # # set extent of canvas as well as what layers you would like to display
+        # canvas.setExtent(self.nodeLayer.extent())
+        # canvas.setLayerSet([QgsMapCanvasLayer(layer)])
+        # canvas.refresh()
 
-        # rendering my map canvas to tif image
-        settings = canvas.mapSettings()
-        settings.setLayers([layer.id()])
-        job = QgsMapRendererParallelJob(settings)
-        job.start()
-        job.waitForFinished()
-        image = job.renderedImage()
+        # # rendering my map canvas to tif image
+        # settings = canvas.mapSettings()
+        # settings.setLayers([layer.id()])
+        # job = QgsMapRendererParallelJob(settings)
+        # job.start()
+        # job.waitForFinished()
+        # image = job.renderedImage()
 
-        path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
-        if ok:
-            self.log_box.append(path)
-        else:
-            self.log_box.append("screenshot failed")
+        # path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
+        # if ok:
+        #     self.log_box.append(path)
+        # else:
+        #     self.log_box.append("screenshot failed")
 
-        image.save(path)
+        # image.save(path)
 
     def _handle_edge_selection(self):
         selected_edges = self.edgeLayer.selectedFeatures()
