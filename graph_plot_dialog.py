@@ -54,6 +54,7 @@ from qgis.core import QgsApplication, \
 
 from qgis.PyQt.QtGui import QColor, QFont, QBrush
 from qgis.utils import iface
+from qgis.gui import QgsMapCanvas
 
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -150,7 +151,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
             "ADJ_FILE": self.adj_file_path,
             "COORDS_FILE": self.coords_file_path,
             "DOT_FILE": self.dot_file_path,
-            "SAVE_FILE": self.save_file_path
+            "SAVE_FILE": self.save_file_path,
+            "CALC_EDGES": self.calculate_edges
         }
 
         # load saved input
@@ -166,7 +168,10 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
                 l = list()
 
                 for key, val in self.elem_config_map.items():
-                    l.append(f"{key}={val.text()}")
+                    if key == 'CALC_EDGES':
+                        l.append(f"{key}={'true' if val.isChecked() else 'false'}")
+                    else:
+                        l.append(f"{key}={val.text()}")
 
                 f.write('\n'.join(l))
         except:
@@ -180,8 +185,11 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
                     for line in f.readlines():
                         key, val = line.strip('\n').split("=")
                         elem = self.elem_config_map[key]
-
-                        elem.setText(val)
+                        
+                        if key == 'CALC_EDGES':
+                            elem.setChecked(val == "true")
+                        else:
+                            elem.setText(val)
             except:
                 self.logBox.append("Error: could not load from config file.")
 
@@ -795,11 +803,32 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.log_box.append(f"taking screenshot of {rect}")
 
+        # create Qt mapCanvas widget
+        canvas = QgsMapCanvas()
+        canvas.setCanvasColor(QColor.white)
+        canvas.enableAntiAliasing(True)
+
+
+        # set extent of canvas as well as what layers you would like to display
+        canvas.setExtent(self.nodeLayer.extent())
+        canvas.setLayerSet([QgsMapCanvasLayer(layer)])
+        canvas.refresh()
+
+        # rendering my map canvas to tif image
+        settings = canvas.mapSettings()
+        settings.setLayers([layer.id()])
+        job = QgsMapRendererParallelJob(settings)
+        job.start()
+        job.waitForFinished()
+        image = job.renderedImage()
+
         path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
         if ok:
             self.log_box.append(path)
         else:
             self.log_box.append("screenshot failed")
+
+        image.save(path)
 
     def _handle_edge_selection(self):
         selected_edges = self.edgeLayer.selectedFeatures()

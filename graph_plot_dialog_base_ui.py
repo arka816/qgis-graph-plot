@@ -123,6 +123,7 @@ class Ui_GraphPlotDialogBase(object):
         self.screenshot_btn.setObjectName("screenshot_btn")
         self.calculate_edges = QtWidgets.QCheckBox(self.scrollAreaWidgetContents_2)
         self.calculate_edges.setGeometry(QtCore.QRect(20, 1070, 331, 31))
+        self.calculate_edges.setChecked(True)
         self.calculate_edges.setObjectName("calculate_edges")
         self.scrollArea.setWidget(self.scrollAreaWidgetContents_2)
 
