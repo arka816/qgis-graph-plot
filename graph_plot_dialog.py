@@ -107,6 +107,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
     _selected_cell_pos = None
 
+    # SCREENSHOT functionality
+    _SCREENSHOT_MIN_DIM = 1920
+
 
     def __init__(self, parent=None):
         """Constructor."""
@@ -118,10 +121,11 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
 
-        winsound.PlaySound(
-            os.path.join(os.path.dirname(__file__), "music", "tb.wav"), 
-            winsound.SND_ASYNC | winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_NODEFAULT
-        )
+        # easter egg
+        # winsound.PlaySound(
+        #     os.path.join(os.path.dirname(__file__), "music", "tb.wav"), 
+        #     winsound.SND_ASYNC | winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_NODEFAULT
+        # )
 
         self.config_file_path = os.path.join(localdir, ".conf")
 
@@ -144,7 +148,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.commit_btn.clicked.connect(self._commit_edits)
         self.close_layers_btn.clicked.connect(self._remove_layers)
         self.del_edge_btn.clicked.connect(self._delete_edge)
-        self.screenshot_btn.clicked.connect(self._take_screenshot)
+        self.screenshot_btn.clicked.connect(lambda *args: self._take_screenshot('full'))
         self.adjacency_table.cellClicked.connect(self._table_cell_clicked)
 
         iface.layerTreeView().currentLayerChanged.connect(self._commit_edits)
@@ -744,7 +748,7 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         self.layer_group.addLayer(self.nodeLayer)
 
         # TO TAKE A SCREENSHOT
-        self.nodeLayer.selectionChanged.connect(self._take_screenshot)
+        self.nodeLayer.selectionChanged.connect(lambda *args: self._take_screenshot('selection', *args))
 
         # EDGE LAYER
         # TODO: convert to multilinestring
@@ -795,30 +799,56 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         
         iface.layerTreeView().setCurrentLayer(self.edgeLayer)
 
-    def _take_screenshot(self, *args):
-        # take screenshot
-        # currently takes screenshot by grabbing data from screen
-        # TODO: use gdal to rasterize layers and produce image from bitmap in later versions
+    def _take_screenshot(self, extent_mode, *args):
+        # TODO: fix feature size issue
 
-        # W, S, E, N
-        rect = self.nodeLayer.boundingBoxOfSelected()
-
-        self.log_box.append(f"taking screenshot of {rect}")
+        print(*args)
 
         # create Qt mapCanvas widget
         canvas = QgsMapCanvas()
         canvas.setCanvasColor(QColor("white"))
         canvas.enableAntiAliasing(True)
 
+        node_list = QgsProject.instance().layerTreeRoot().findLayers()
+        visible_node_list = list(filter(lambda layer: layer.isVisible(), node_list))
+        visible_layer_list = [l.layer() for l in visible_node_list]
+
+        if len(visible_layer_list) == 0:
+            self.log_box.append("no visible layers")
+            return
+        
+        if extent_mode == 'full':
+            extent = iface.mapCanvas().extent()
+        elif extent_mode == 'selection':
+            # W, S, E, N
+            extent = self.nodeLayer.boundingBoxOfSelected()
+
+        extent_lat, extent_lng = extent.height(), extent.width()
+
+        self.log_box.append(f"taking screenshot of {extent}")
 
         # set extent of canvas as well as what layers you would like to display
-        canvas.setExtent(self.nodeLayer.extent())
-        canvas.setLayers([self.nodeLayer])
+        canvas.setExtent(extent)
+        canvas.setLayers(visible_layer_list)
         canvas.refresh()
 
         # rendering my map canvas to tif image
         settings = canvas.mapSettings()
-        settings.setLayers([self.nodeLayer])
+        settings.setLayers(visible_layer_list)
+
+        # resize output image
+        # size = QtCore.QSize()
+        # if extent_lng < extent_lat:
+        #     height, width = int(self._SCREENSHOT_MIN_DIM * extent_lat / extent_lng), self._SCREENSHOT_MIN_DIM
+        # else:
+        #     height, width = self._SCREENSHOT_MIN_DIM, int(self._SCREENSHOT_MIN_DIM * extent_lng / extent_lat)
+        # size.setHeight(height)
+        # size.setWidth(width)
+
+        # settings.setOutputSize(size)
+
+        # self.log_box.append(f"{size.height()} {size.width()} {extent_lat} {extent_lng}")
+
         job = QgsMapRendererParallelJob(settings)
         job.start()
         job.waitForFinished()
@@ -826,9 +856,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         path, ok = QFileDialog.getSaveFileName(iface.mainWindow(), "Save Screenshot", "", "Images (*.png *.jpg)");
         if ok:
-            self.log_box.append(path)
+            self.log_box.append(f"screenshot saved at: {path}")
         else:
-            self.log_box.append("screenshot failed")
+            self.log_box.append("screenshot canceled")
 
         image.save(path)
 
