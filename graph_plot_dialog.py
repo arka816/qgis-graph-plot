@@ -51,7 +51,8 @@ from qgis.core import QgsApplication, \
     QgsLineSymbol, \
     QgsRendererRange, QgsVectorLayerEditUtils, \
     QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayerBase, QgsSimpleMarkerSymbolLayer, QgsMarkerLineSymbolLayer, \
-    QgsMapRendererParallelJob
+    QgsMapRendererParallelJob, \
+    QgsMapLayerDependency
 
 from qgis.PyQt.QtGui import QColor, QFont, QBrush
 from qgis.utils import iface
@@ -129,6 +130,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.config_file_path = os.path.join(localdir, ".conf")
 
+        self.layer_tree_root = QgsProject.instance().layerTreeRoot()
+
         # TODO: make labeled slider
         self.edge_thres_slider.setRange(0, self._THRESHOLD_UNIT)
         self.edge_thres_slider.setSingleStep(1)
@@ -166,7 +169,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # connect to input saver
         self.rejected.connect(self._save_input)
-        self.rejected.connect(lambda *args: winsound.PlaySound(None, winsound.SND_ASYNC))
+        # self.rejected.connect(lambda *args: winsound.PlaySound(None, winsound.SND_ASYNC))
+
+        QgsProject.instance().isDirtyChanged.connect(lambda *args: QgsProject.instance().setDirty(False))
 
     def _save_input(self):
         try:
@@ -728,7 +733,6 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         if self.calculate_edges.isChecked():
             self._get_edges()
 
-        self.layer_tree_root = QgsProject.instance().layerTreeRoot()
         self.layer_group = self.layer_tree_root.addGroup('graph_plot')
 
         # NODE LAYER
@@ -945,6 +949,9 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
         QgsProject.instance().addMapLayer(self.bezierCtrlLayer, False)
         self.layer_group.insertLayer(0, self.bezierCtrlLayer)
 
+        dependency = QgsMapLayerDependency(self.bezierCtrlLayer.id(), QgsMapLayerDependency.DataDependency, QgsMapLayerDependency.FromUser)
+        self.bezierCtrlLayer.setDependencies([dependency])
+
         # create bezier curve layer
         self.bezierCurveLayer = QgsVectorLayer('LineString?crs=epsg:4326', 'bezier curve', 'memory')
         # self.bezierCurveLayer.setFlags(QgsMapLayer.Private)
@@ -1090,6 +1097,8 @@ class GraphPlotDialog(QtWidgets.QDialog, FORM_CLASS):
 
         # remove bezier layers
         self.bezierCtrlLayer.geometryChanged.disconnect(self._control_point_updated)
+        self.bezierCtrlLayer.commitChanges()
+        self.bezierCurveLayer.commitChanges()
         QgsProject.instance().removeMapLayers([self.bezierCtrlLayer.id(), self.bezierCurveLayer.id()])
 
 
